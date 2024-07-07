@@ -117,6 +117,7 @@ def run_batch_predictions(
             _, transformed_test_data = fit_transform_with_pipeline(
                 inference_pipeline, validated_test_data
             )
+            logger.info(f"Transformed test data shape: {transformed_test_data.shape}")
 
             logger.info("Loading predictor model...")
             predictor_model = load_predictor_model(predictor_dir_path)
