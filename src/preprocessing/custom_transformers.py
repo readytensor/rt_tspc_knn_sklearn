@@ -76,9 +76,10 @@ class LabelEncoder(BaseEstimator, TransformerMixin):
             self
         """
         for col in self.columns:
-            self.encoders[col] = {
-                label: idx for idx, label in enumerate(sorted(X[col].unique()))
-            }
+            if col in X.columns:
+                self.encoders[col] = {
+                    label: idx for idx, label in enumerate(sorted(X[col].unique()))
+                }
         return self
 
     def transform(self, X: pd.DataFrame):
@@ -93,7 +94,8 @@ class LabelEncoder(BaseEstimator, TransformerMixin):
 
         X = X.copy()
         for col in self.columns:
-            X[col] = X[col].map(self.encoders[col])
+            if col in X.columns:
+                X[col] = X[col].map(self.encoders[col])
         return X
 
     def inverse_transform(
@@ -262,7 +264,7 @@ class DataFrameSorter(BaseEstimator, TransformerMixin):
 
 class PaddingTransformer(BaseEstimator, TransformerMixin):
     def __init__(
-        self, id_col: str, target_col: str, padding_value=PADDING_VALUE
+        self, id_col: str, target_col: str, padding_value: float
     ) -> None:
         super().__init__()
         self.id_col = id_col
@@ -270,11 +272,10 @@ class PaddingTransformer(BaseEstimator, TransformerMixin):
         self.padding_value = padding_value
 
     def fit(self, X, y=None):
+        self.max_length = X.groupby(self.id_col).size().max()
         return self
 
     def transform(self, X):
-
-        self.max_length = X.groupby(self.id_col).size().max()
         padded_X = None
         grouped = X.groupby(self.id_col)
         if len(grouped) == 1:
@@ -313,37 +314,41 @@ class ReshaperToThreeD(BaseEstimator, TransformerMixin):
         super().__init__()
         self.id_col = id_col
         self.time_col = time_col
+        self.id_columns = [self.id_col, self.time_col]
         if not isinstance(value_columns, list):
             self.value_columns = [value_columns]
         else:
             self.value_columns = value_columns
         # ensure id and time columns are included to be able to join the windows during inference
-        self.value_columns = [id_col, time_col] + self.value_columns
+        self.cols_to_reshape = [id_col, time_col] + self.value_columns
         self.target_column = target_column
         self.id_vals = None
-        self.fitted_value_columns = None
         self.time_periods = None
 
     def fit(self, X, y=None):
-        if self.target_column in X.columns:
-            self.value_columns.append(self.target_column)
-        self.id_vals = X[[self.id_col]].drop_duplicates().sort_values(by=self.id_col)
-        self.id_vals.reset_index(inplace=True, drop=True)
-        self.time_periods = sorted(X[self.time_col].dropna().unique())
-        grouped = X.groupby(self.id_col)
-        self.T = 0
-        for _, group in grouped:
-            self.T = max(self.T, group.shape[0])
-
-        self.fitted_value_columns = [c for c in self.value_columns if c in X.columns]
         return self
 
     def transform(self, X):
-        N = self.id_vals.shape[0]
-        T = self.T
-        D = len(self.value_columns)
+        self.id_vals = X[[self.id_col]].drop_duplicates().sort_values(by=self.id_col)
+        self.id_vals.reset_index(inplace=True, drop=True)
+        self.time_periods = sorted(X[self.time_col].dropna().unique())
+        reshaped_columns = [c for c in self.cols_to_reshape if c in X.columns]
+        if self.target_column in X.columns:
+            reshaped_columns.append(self.target_column)
 
-        X = X[self.value_columns].values.reshape((N, T, D))
+        value_counts = X[[self.id_col]].value_counts()
+
+        # Check if all value counts are the same
+        if not value_counts.nunique() == 1:
+            raise ValueError(
+                "The counts are not the same for all ids. "
+                "Did you pad the data?"
+            )
+        T = value_counts.iloc[0]
+        N = self.id_vals.shape[0]
+        D = len(reshaped_columns)
+
+        X = X[reshaped_columns].values.reshape((N, T, D))
         return X
 
     def inverse_transform(self, preds_df):
@@ -359,8 +364,8 @@ class ReshaperToThreeD(BaseEstimator, TransformerMixin):
             preds_df,
             id_vars=self.id_columns,
             value_vars=time_cols,
-            var_name=self.time_column,
-            value_name=self.value_columns[0],
+            var_name=self.time_col,
+            value_name='prediction',
         )
 
         return preds_df
@@ -399,6 +404,15 @@ class TimeSeriesWindowGenerator(BaseEstimator, TransformerMixin):
         Returns:
             self
         """
+        n_series, time_length, n_features = X.shape
+
+        # Validate window size and stride
+        if self.window_size > time_length:
+            print(
+                "Window size must be less than or equal to the time dimension length. \n"
+                f"Given window size {self.window_size} will be trimmed to length {time_length}."
+            )
+            self.window_size = time_length
         return self
 
     def transform(self, X):
