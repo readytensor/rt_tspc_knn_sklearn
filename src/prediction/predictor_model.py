@@ -33,8 +33,8 @@ class TSAnnotator:
 
     def __init__(
         self,
-        data_schema: TSAnnotationSchema,
-        encode_len: int,
+        feat_dim:int,
+        n_classes:int,
         n_neighbors: int = 7,
         **kwargs,
     ):
@@ -42,11 +42,12 @@ class TSAnnotator:
         Construct a new KNN TSAnnotator.
 
         Args:
-            encode_len (int): Encoding (history) length.
+            feat_dim (int): Number of features.
+            n_classes (int): Number of target classes.
             n_neighbors (int): Number of neighbors to use.
         """
-        self.data_schema = data_schema
-        self.encode_len = int(encode_len)
+        self.feat_dim = feat_dim
+        self.n_classes = n_classes
         self.n_neighbors = n_neighbors
         self.kwargs = kwargs
         self.model = self.build_model()
@@ -57,51 +58,35 @@ class TSAnnotator:
         model = KNeighborsClassifier(
             n_neighbors=self.n_neighbors,
             n_jobs=n_jobs,
-            **self.kwargs,
         )
         return model
 
-    def _get_X_and_y(
-        self, data: np.ndarray, is_train: bool = True
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    def _get_X_and_y(self, data: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Extract X (historical target series), y (forecast window target)
         When is_train is True, data contains both history and forecast windows.
         When False, only history is contained.
         """
         N, T, D = data.shape
-        if is_train:
-            if T != self.encode_len:
-                raise ValueError(
-                    f"Training data expected to have {self.encode_len}"
-                    f" length on axis 1. Found length {T}"
-                )
-            # we excluded the first 2 dimensions (id, time) and the last dimension (target)
-            X = data[:, :, 2:-1].reshape(N, -1)  # shape = [N, T*D]
-            y = data[:, :, -1].astype(int)  # shape = [N, T]
+        window_ids = data[:, :, :2]
+        X = data[:, :, 2:self.feat_dim + 2].reshape(N, -1)
+        if D == self.feat_dim + 3:
+            y = data[:, :, -1].astype(int)
         else:
-            # for inference
-            if T < self.encode_len:
-                raise ValueError(
-                    f"Inference data length expected to be >= {self.encode_len}"
-                    f" on axis 1. Found length {T}"
-                )
-            # X = data.reshape(N, -1)
-            X = data[:, :, 2:].reshape(N, -1)
-            y = data[:, :, 0:2]
-        return X, y
+            y = None
+        return X, y, window_ids
 
     def fit(self, train_data):
-        train_X, train_y = self._get_X_and_y(train_data, is_train=True)
+        train_X, train_y, window_ids = self._get_X_and_y(train_data)
         self.model.fit(train_X, train_y)
         self._is_trained = True
         return self.model
 
     def predict(self, data):
-        X, window_ids = self._get_X_and_y(data, is_train=False)
+        X, y, window_ids = self._get_X_and_y(data)
         preds = self.model.predict_proba(X)
-        for i in range(len(preds)):
-            if preds[i].shape[1] > len(self.data_schema.target_classes):
-                preds[i] = preds[i][:, :-1]
+        for i, pred in enumerate(preds):
+            if pred.shape[1] > self.n_classes:
+                preds[i] = pred[:, :-1]
         preds = np.array(preds)
         preds = preds.transpose(1, 0, 2)
 
@@ -121,18 +106,16 @@ class TSAnnotator:
         }
 
         sorted_dict = {key: prob_dict[key] for key in sorted(prob_dict.keys())}
-        probabilities = np.vstack(sorted_dict.values())
+        probabilities = np.vstack(list(sorted_dict.values()))
         return probabilities
 
     def evaluate(self, test_data):
         """Evaluate the model and return the loss and metrics"""
-        x_test, y_test = self._get_X_and_y(test_data, is_train=True)
         if self.model is not None:
-            prediction = self.model.predict(x_test).flatten()
-            y_test = y_test.flatten()
-            f1 = f1_score(y_test, prediction, average="weighted")
+            x_test, y_test, _ = self._get_X_and_y(test_data)
+            prediction = self.model.predict(x_test)
+            f1 = f1_score(y_test.flatten(), prediction.flatten(), average="weighted")
             return f1
-
         raise NotFittedError("Model is not fitted yet.")
 
     def save(self, model_dir_path: str) -> None:
@@ -174,7 +157,8 @@ def train_predictor_model(
         'TSAnnotator': The TSAnnotator model
     """
     model = TSAnnotator(
-        data_schema=data_schema,
+        feat_dim=len(data_schema.features),
+        n_classes=len(data_schema.target_classes),
         **hyperparameters,
     )
     model.fit(train_data=train_data)
