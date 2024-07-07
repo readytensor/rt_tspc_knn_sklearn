@@ -104,6 +104,7 @@ def run_training(
                 )
 
                 hyperparameters.update(tuned_hyperparameters)
+                logger.info(f"Tuned hyperparameters: {hyperparameters}")
 
             logger.info("Fitting preprocessing pipelines...")
             training_pipeline, inference_pipeline = get_preprocessing_pipelines(
@@ -115,7 +116,7 @@ def run_training(
                 training_pipeline, validated_data
             )
 
-            print("Transformed data shape: ", transformed_data.shape)
+            logger.info(f"Transformed data shape: {transformed_data.shape}")
 
             logger.info("Training annotator...")
             annotator = train_predictor_model(
