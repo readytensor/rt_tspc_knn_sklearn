@@ -12,6 +12,7 @@ from prediction.predictor_model import evaluate_predictor_model, train_predictor
 from preprocessing.preprocess import (
     get_preprocessing_pipelines,
     fit_transform_with_pipeline,
+    transform_data
 )
 
 HPT_RESULTS_FILE_NAME = "HPT_results.csv"
@@ -155,6 +156,9 @@ class HyperParameterTuner:
             _, transformed_data = fit_transform_with_pipeline(
                 training_pipeline, train_split
             )
+            transformed_valid_data = transform_data(
+                training_pipeline, valid_split
+            )
 
             # train model
             classifier = train_predictor_model(
@@ -162,11 +166,6 @@ class HyperParameterTuner:
                 data_schema=data_schema,
                 hyperparameters=hyperparameters,
             )
-
-            _, transformed_valid_data = fit_transform_with_pipeline(
-                inference_pipeline, valid_split
-            )
-
             # evaluate the model
             score = round(
                 evaluate_predictor_model(classifier, transformed_valid_data), 6
