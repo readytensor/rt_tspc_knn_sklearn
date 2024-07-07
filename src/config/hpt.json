@@ -1,13 +1,21 @@
 {
-    "num_trials": 10,
-    "hyperparameters": [
-      {
-        "name": "encode_len",
-        "short_desc": "The window size.",
-        "type": "int",
-        "search_type": "uniform",
-        "range_low": 2,
-        "range_high": 100
-      }
-    ]
-  }
+  "num_trials": 10,
+  "hyperparameters": [
+    {
+      "name": "encode_len",
+      "short_desc": "The window size.",
+      "type": "int",
+      "search_type": "uniform",
+      "range_low": 8,
+      "range_high": 128
+    },
+    {
+      "name": "n_neighbors",
+      "short_desc": "Number of neighbors to use.",
+      "type": "int",
+      "search_type": "uniform",
+      "range_low": 3,
+      "range_high": 10
+    }
+  ]
+}
