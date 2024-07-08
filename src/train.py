@@ -8,6 +8,7 @@ from prediction.predictor_model import (
 from preprocessing.preprocess import (
     get_preprocessing_pipelines,
     fit_transform_with_pipeline,
+    fit_pipeline,
     save_pipelines,
 )
 from schema.data_schema import load_json_data_schema, save_schema
@@ -116,7 +117,11 @@ def run_training(
                 training_pipeline, validated_data
             )
 
+            inference_pipeline = fit_pipeline(inference_pipeline, validated_data)
+
             logger.info(f"Transformed data shape: {transformed_data.shape}")
+            trimmed_encode_len = transformed_data.shape[1]
+            hyperparameters["encode_len"] = trimmed_encode_len
 
             logger.info("Training annotator...")
             annotator = train_predictor_model(

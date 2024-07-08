@@ -48,10 +48,8 @@ def create_preprocess_pipelines(
             ),
         ),
         (
-            "minmax_scaler", 
-            transformers.TimeSeriesMinMaxScaler(
-                columns=data_schema.features
-             )
+            "minmax_scaler",
+            transformers.TimeSeriesMinMaxScaler(columns=data_schema.features),
         ),
         (
             "padding",
@@ -74,45 +72,37 @@ def create_preprocess_pipelines(
                 target_column=data_schema.target,
             ),
         ),
-        (
-            "window_generator",
-            transformers.TimeSeriesWindowGenerator(
-                window_size=encode_len,
-                stride=1,
-                max_windows=preprocessing_config["max_windows"],
-            ),
-        ),
     ]
     training_steps = common_steps.copy()
     inference_steps = common_steps.copy()
 
-    # # training-specific steps
-    # training_steps.extend(
-    #     [
-    #         (
-    #             "window_generator",
-    #             transformers.TimeSeriesWindowGenerator(
-    #                 window_size=encode_len,
-    #                 stride=1,
-    #                 max_windows=preprocessing_config["max_windows"],
-    #             ),
-    #         ),
-    #     ]
-    # )
-    # # inference-specific steps
-    # inference_steps.extend(
-    #     [
-    #         (
-    #             "window_generator",
-    #             transformers.TimeSeriesWindowGenerator(
-    #                 window_size=encode_len,
-    #                 stride=encode_len // 2,
-    #                 max_windows=None,
-    #                 mode="inference",
-    #             ),
-    #         ),
-    #     ]
-    # )
+    # training-specific steps
+    training_steps.extend(
+        [
+            (
+                "window_generator",
+                transformers.TimeSeriesWindowGenerator(
+                    window_size=encode_len,
+                    stride=1,
+                    max_windows=preprocessing_config["max_windows"],
+                ),
+            ),
+        ]
+    )
+    # inference-specific steps
+    inference_steps.extend(
+        [
+            (
+                "window_generator",
+                transformers.TimeSeriesWindowGenerator(
+                    window_size=encode_len,
+                    stride=encode_len // 2,
+                    max_windows=None,
+                    mode="inference",
+                ),
+            ),
+        ]
+    )
     return Pipeline(training_steps), Pipeline(inference_steps)
 
 

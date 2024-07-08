@@ -12,7 +12,8 @@ from prediction.predictor_model import evaluate_predictor_model, train_predictor
 from preprocessing.preprocess import (
     get_preprocessing_pipelines,
     fit_transform_with_pipeline,
-    transform_data
+    fit_pipeline,
+    transform_data,
 )
 
 HPT_RESULTS_FILE_NAME = "HPT_results.csv"
@@ -156,9 +157,28 @@ class HyperParameterTuner:
             _, transformed_data = fit_transform_with_pipeline(
                 training_pipeline, train_split
             )
+
+            label_encoder = training_pipeline.named_steps["target_encoder"].encoders[
+                data_schema.target
+            ]
+
+            truth_labels = valid_split[data_schema.target].map(label_encoder).values
+            unlabeled_valid_split = valid_split.drop(columns=[data_schema.target])
+            inference_pipeline = fit_pipeline(inference_pipeline, train_split)
+
             transformed_valid_data = transform_data(
-                training_pipeline, valid_split
+                inference_pipeline, unlabeled_valid_split
             )
+
+            trimmed_encode_length = {"encode_len": transformed_data.shape[1]}
+
+            if transformed_data.shape[1] != transformed_valid_data.shape[1]:
+                print(
+                    "The provided encode length cannot be applied to both datasets as one of them is shorter than encode length."
+                )
+                return 1.0e6
+
+            hyperparameters.update(trimmed_encode_length)
 
             # train model
             classifier = train_predictor_model(
@@ -166,9 +186,13 @@ class HyperParameterTuner:
                 data_schema=data_schema,
                 hyperparameters=hyperparameters,
             )
+
             # evaluate the model
             score = round(
-                evaluate_predictor_model(classifier, transformed_valid_data), 6
+                evaluate_predictor_model(
+                    classifier, transformed_valid_data, truth_labels
+                ),
+                6,
             )
             if np.isnan(score) or math.isinf(score):
                 # sometimes loss becomes inf/na, so use a large "bad" value

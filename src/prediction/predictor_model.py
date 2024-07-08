@@ -109,14 +109,12 @@ class TSAnnotator:
         probabilities = np.vstack(list(sorted_dict.values()))
         return probabilities
 
-    def evaluate(self, test_data):
-        """Evaluate the model and return the loss and metrics"""
-        if self.model is not None:
-            x_test, y_test, _ = self._get_X_and_y(test_data)
-            prediction = self.model.predict(x_test)
-            f1 = f1_score(y_test.flatten(), prediction.flatten(), average="weighted")
-            return f1
-        raise NotFittedError("Model is not fitted yet.")
+    def evaluate(self, test_data, truth_labels):
+        """Evaluate the model and return the metric"""
+        predictions = self.predict(test_data)
+        predictions = np.argmax(predictions, axis=1)
+        f1 = f1_score(truth_labels, predictions, average="weighted")
+        return f1
 
     def save(self, model_dir_path: str) -> None:
         """Save the KNN TSAnnotator to disk.
@@ -205,15 +203,16 @@ def load_predictor_model(predictor_dir_path: str) -> TSAnnotator:
     return TSAnnotator.load(predictor_dir_path)
 
 
-def evaluate_predictor_model(model: TSAnnotator, test_split: np.ndarray) -> float:
+def evaluate_predictor_model(model: TSAnnotator, test_split: np.ndarray, truth_labels: np.ndarray) -> float:
     """
     Evaluate the TSAnnotator model and return the r-squared value.
 
     Args:
         model (TSAnnotator): The TSAnnotator model.
         test_split (np.ndarray): Test data.
+        truth_labels (np.ndarray): The truth labels.
 
     Returns:
         float: The r-squared value of the TSAnnotator model.
     """
-    return model.evaluate(test_split)
+    return model.evaluate(test_split, truth_labels)

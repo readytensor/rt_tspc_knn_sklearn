@@ -263,9 +263,7 @@ class DataFrameSorter(BaseEstimator, TransformerMixin):
 
 
 class PaddingTransformer(BaseEstimator, TransformerMixin):
-    def __init__(
-        self, id_col: str, target_col: str, padding_value: float
-    ) -> None:
+    def __init__(self, id_col: str, target_col: str, padding_value: float) -> None:
         super().__init__()
         self.id_col = id_col
         self.target_col = target_col
@@ -299,10 +297,14 @@ class PaddingTransformer(BaseEstimator, TransformerMixin):
                 )
 
         if self.target_col in padded_X.columns:
-            padding_label = X[self.target_col].iloc[0]
+            labels = X[self.target_col].unique().tolist()
+            num_padding_entries = padded_X[
+                padded_X[self.target_col] == self.padding_value
+            ].shape[0]
+            random_labels = np.random.choice(labels, num_padding_entries)
             padded_X.loc[
                 padded_X[self.target_col] == self.padding_value, self.target_col
-            ] = padding_label
+            ] = random_labels
             label_dtype = X[self.target_col].dtype
             padded_X[self.target_col] = padded_X[self.target_col].astype(label_dtype)
 
@@ -341,8 +343,7 @@ class ReshaperToThreeD(BaseEstimator, TransformerMixin):
         # Check if all value counts are the same
         if not value_counts.nunique() == 1:
             raise ValueError(
-                "The counts are not the same for all ids. "
-                "Did you pad the data?"
+                "The counts are not the same for all ids. " "Did you pad the data?"
             )
         T = value_counts.iloc[0]
         N = self.id_vals.shape[0]
@@ -365,7 +366,7 @@ class ReshaperToThreeD(BaseEstimator, TransformerMixin):
             id_vars=self.id_columns,
             value_vars=time_cols,
             var_name=self.time_col,
-            value_name='prediction',
+            value_name="prediction",
         )
 
         return preds_df
@@ -404,15 +405,6 @@ class TimeSeriesWindowGenerator(BaseEstimator, TransformerMixin):
         Returns:
             self
         """
-        n_series, time_length, n_features = X.shape
-
-        # Validate window size and stride
-        if self.window_size > time_length:
-            print(
-                "Window size must be less than or equal to the time dimension length. \n"
-                f"Given window size {self.window_size} will be trimmed to length {time_length}."
-            )
-            self.window_size = time_length
         return self
 
     def transform(self, X):
@@ -429,9 +421,11 @@ class TimeSeriesWindowGenerator(BaseEstimator, TransformerMixin):
 
         # Validate window size and stride
         if self.window_size > time_length:
-            raise ValueError(
-                "Window size must be less than or equal to the time dimension length"
+            print(
+                "Window size must be less than or equal to the time dimension length. \n"
+                f"Given window size {self.window_size} will be trimmed to length {time_length - 1}."
             )
+            self.window_size = time_length - 1
 
         # Calculate the total number of windows per series
         n_windows_per_series = 1 + (time_length - self.window_size) // self.stride
