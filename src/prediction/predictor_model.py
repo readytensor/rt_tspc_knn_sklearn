@@ -7,8 +7,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.exceptions import NotFittedError
 from multiprocessing import cpu_count
 from sklearn.metrics import f1_score
-from schema.data_schema import TSAnnotationSchema
-from preprocessing.custom_transformers import PADDING_VALUE
+from schema.data_schema import TimeStepClassificationSchema
 from typing import Tuple
 
 warnings.filterwarnings("ignore")
@@ -22,67 +21,85 @@ n_jobs = max(1, n_cpus - 1)
 print(f"Using n_jobs = {n_jobs}")
 
 
-class TSAnnotator:
-    """KNN Timeseries Annotator.
+class TimeStepClassifier:
+    """KNeighbors TimeStepClassifier.
 
     This class provides a consistent interface that can be used with other
-    TSAnnotator models.
+    TimeStepClassifier models.
     """
 
-    MODEL_NAME = "KNN_Timeseries_Annotator"
+    MODEL_NAME = "KNeighbors_TimeStepClassifier"
 
     def __init__(
         self,
-        feat_dim:int,
-        n_classes:int,
-        n_neighbors: int = 7,
+        n_classes: int,
+        encode_len: int,
+        padding_value: float,
+        n_neighbors: int = 5,
         **kwargs,
     ):
         """
-        Construct a new KNN TSAnnotator.
+        Construct a new KNeighbors TimeStepClassifier.
 
         Args:
-            feat_dim (int): Number of features.
             n_classes (int): Number of target classes.
+            encode_len (int): Encoding (history) length.
+            padding_value (float): Padding value.
             n_neighbors (int): Number of neighbors to use.
         """
-        self.feat_dim = feat_dim
         self.n_classes = n_classes
+        self.encode_len = int(encode_len)
+        self.padding_value = padding_value
         self.n_neighbors = n_neighbors
         self.kwargs = kwargs
         self.model = self.build_model()
         self._is_trained = False
 
     def build_model(self) -> KNeighborsClassifier:
-        """Build a new KNN regressor."""
+        """Build a new KNeighbors classifier."""
         model = KNeighborsClassifier(
             n_neighbors=self.n_neighbors,
             n_jobs=n_jobs,
+            **self.kwargs,
         )
         return model
 
-    def _get_X_and_y(self, data: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def _get_X_and_y(
+        self, data: np.ndarray, is_train: bool = True
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """Extract X (historical target series), y (forecast window target)
         When is_train is True, data contains both history and forecast windows.
         When False, only history is contained.
         """
         N, T, D = data.shape
-        window_ids = data[:, :, :2]
-        X = data[:, :, 2:self.feat_dim + 2].reshape(N, -1)
-        if D == self.feat_dim + 3:
-            y = data[:, :, -1].astype(int)
+        if is_train:
+            if T != self.encode_len:
+                raise ValueError(
+                    f"Training data expected to have {self.encode_len}"
+                    f" length on axis 1. Found length {T}"
+                )
+            # we excluded the first 2 dimensions (id, time) and the last dimension (target)
+            X = data[:, :, 2:-1].reshape(N, -1)  # shape = [N, T*D]
+            y = data[:, :, -1].astype(int)  # shape = [N, T]
         else:
-            y = None
-        return X, y, window_ids
+            # for inference
+            if T < self.encode_len:
+                raise ValueError(
+                    f"Inference data length expected to be >= {self.encode_len}"
+                    f" on axis 1. Found length {T}"
+                )
+            X = data[:, :, 2:].reshape(N, -1)
+            y = data[:, :, 0:2]
+        return X, y
 
     def fit(self, train_data):
-        train_X, train_y, window_ids = self._get_X_and_y(train_data)
+        train_X, train_y = self._get_X_and_y(train_data, is_train=True)
         self.model.fit(train_X, train_y)
         self._is_trained = True
         return self.model
 
     def predict(self, data):
-        X, y, window_ids = self._get_X_and_y(data)
+        X, window_ids = self._get_X_and_y(data, is_train=False)
         preds = self.model.predict_proba(X)
         for i, pred in enumerate(preds):
             if pred.shape[1] > self.n_classes:
@@ -102,7 +119,7 @@ class TSAnnotator:
         prob_dict = {
             k: np.mean(np.array(v), axis=0)
             for k, v in prob_dict.items()
-            if k[1] != PADDING_VALUE
+            if k[1] != self.padding_value
         }
 
         sorted_dict = {key: prob_dict[key] for key in sorted(prob_dict.keys())}
@@ -110,14 +127,14 @@ class TSAnnotator:
         return probabilities
 
     def evaluate(self, test_data, truth_labels):
-        """Evaluate the model and return the metric"""
+        """Evaluate the model and return the loss and metrics"""
         predictions = self.predict(test_data)
         predictions = np.argmax(predictions, axis=1)
         f1 = f1_score(truth_labels, predictions, average="weighted")
         return f1
 
     def save(self, model_dir_path: str) -> None:
-        """Save the KNN TSAnnotator to disk.
+        """Save the KNeighborsTimeStepClassifier to disk.
 
         Args:
             model_dir_path (str): Dir path to which to save the model.
@@ -127,13 +144,13 @@ class TSAnnotator:
         joblib.dump(self, os.path.join(model_dir_path, PREDICTOR_FILE_NAME))
 
     @classmethod
-    def load(cls, model_dir_path: str) -> "TSAnnotator":
-        """Load the KNN TSAnnotator from disk.
+    def load(cls, model_dir_path: str) -> "TimeStepClassifier":
+        """Load the KNeighborsTimeStepClassifier from disk.
 
         Args:
             model_dir_path (str): Dir path to the saved model.
         Returns:
-            TSAnnotator: A new instance of the loaded KNN TSAnnotator.
+            TimeStepClassifier: A new instance of the loaded KNeighborsTimeStepClassifier.
         """
         model = joblib.load(os.path.join(model_dir_path, PREDICTOR_FILE_NAME))
         return model
@@ -141,48 +158,51 @@ class TSAnnotator:
 
 def train_predictor_model(
     train_data: np.ndarray,
-    data_schema: TSAnnotationSchema,
+    data_schema: TimeStepClassificationSchema,
     hyperparameters: dict,
-) -> TSAnnotator:
+    padding_value: float,
+) -> TimeStepClassifier:
     """
-    Instantiate and train the TSAnnotator model.
+    Instantiate and train the TimeStepClassifier model.
 
     Args:
         train_data (np.ndarray): The train split from training data.
-        hyperparameters (dict): Hyperparameters for the TSAnnotator.
+        data_schema (TimeStepClassificationSchema): The data schema.
+        hyperparameters (dict): Hyperparameters for the TimeStepClassifier.
+        padding_value (float): The padding value.
 
     Returns:
-        'TSAnnotator': The TSAnnotator model
+        'TimeStepClassifier': The TimeStepClassifier model
     """
-    model = TSAnnotator(
-        feat_dim=len(data_schema.features),
+    model = TimeStepClassifier(
         n_classes=len(data_schema.target_classes),
+        padding_value=padding_value,
         **hyperparameters,
     )
     model.fit(train_data=train_data)
     return model
 
 
-def predict_with_model(model: TSAnnotator, test_data: np.ndarray) -> np.ndarray:
+def predict_with_model(model: TimeStepClassifier, test_data: np.ndarray) -> np.ndarray:
     """
     Make forecast.
 
     Args:
-        model (TSAnnotator): The TSAnnotator model.
-        test_data (np.ndarray): The test input data for annotation.
+        model (TimeStepClassifier): The TimeStepClassifier model.
+        test_data (np.ndarray): The test input data for classification.
 
     Returns:
-        np.ndarray: The annotated data.
+        np.ndarray: The predictions.
     """
     return model.predict(test_data)
 
 
-def save_predictor_model(model: TSAnnotator, predictor_dir_path: str) -> None:
+def save_predictor_model(model: TimeStepClassifier, predictor_dir_path: str) -> None:
     """
-    Save the TSAnnotator model to disk.
+    Save the TimeStepClassifier model to disk.
 
     Args:
-        model (TSAnnotator): The TSAnnotator model to save.
+        model (TimeStepClassifier): The TimeStepClassifier model to save.
         predictor_dir_path (str): Dir path to which to save the model.
     """
     if not os.path.exists(predictor_dir_path):
@@ -190,29 +210,31 @@ def save_predictor_model(model: TSAnnotator, predictor_dir_path: str) -> None:
     model.save(predictor_dir_path)
 
 
-def load_predictor_model(predictor_dir_path: str) -> TSAnnotator:
+def load_predictor_model(predictor_dir_path: str) -> TimeStepClassifier:
     """
-    Load the TSAnnotator model from disk.
+    Load the TimeStepClassifier model from disk.
 
     Args:
         predictor_dir_path (str): Dir path where model is saved.
 
     Returns:
-        TSAnnotator: A new instance of the loaded TSAnnotator model.
+        TimeStepClassifier: A new instance of the loaded TimeStepClassifier model.
     """
-    return TSAnnotator.load(predictor_dir_path)
+    return TimeStepClassifier.load(predictor_dir_path)
 
 
-def evaluate_predictor_model(model: TSAnnotator, test_split: np.ndarray, truth_labels: np.ndarray) -> float:
+def evaluate_predictor_model(
+    model: TimeStepClassifier, test_split: np.ndarray, truth_labels: np.ndarray
+) -> float:
     """
-    Evaluate the TSAnnotator model and return the r-squared value.
+    Evaluate the TimeStepClassifier model and return the r-squared value.
 
     Args:
-        model (TSAnnotator): The TSAnnotator model.
+        model (TimeStepClassifier): The TimeStepClassifier model.
         test_split (np.ndarray): Test data.
-        truth_labels (np.ndarray): The truth labels.
+        truth_labels (np.ndarray): The true labels.
 
     Returns:
-        float: The r-squared value of the TSAnnotator model.
+        float: The r-squared value of the TimeStepClassifier model.
     """
     return model.evaluate(test_split, truth_labels)

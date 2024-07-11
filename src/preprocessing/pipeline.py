@@ -85,6 +85,7 @@ def create_preprocess_pipelines(
                     window_size=encode_len,
                     stride=1,
                     max_windows=preprocessing_config["max_windows"],
+                    padding_value=preprocessing_config["padding_value"],
                 ),
             ),
         ]
@@ -99,6 +100,7 @@ def create_preprocess_pipelines(
                     stride=encode_len // 2,
                     max_windows=None,
                     mode="inference",
+                    padding_value=preprocessing_config["padding_value"],
                 ),
             ),
         ]

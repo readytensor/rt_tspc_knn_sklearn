@@ -112,9 +112,9 @@ class SchemaModel(BaseModel):
 
     @validator("modelCategory", allow_reuse=True)
     def valid_problem_category(cls, v):
-        if v != "time_series_annotation":
+        if v != "time_step_classification":
             raise ValueError(
-                f"modelCategory must be 'time_series_annotation'. Given {v}"
+                f"modelCategory must be 'time_step_classification'. Given {v}"
             )
         return v
 
